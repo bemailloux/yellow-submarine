@@ -151,25 +151,8 @@ void loop() {
     valueB = MTR_OFF;
   }
   
-//  Serial.print("Left Stick Values: X = ");
-//  Serial.print(analogLX, DEC); 
-//  Serial.print(", Y = ");
-//  Serial.print(analogLY, DEC);
-//
-//  Serial.print("   |    Speed: L = ");
-//  Serial.print(valueL, DEC); 
-//  Serial.print(", R = ");
-//  Serial.print(valueR, DEC);
-//  Serial.print("\n");
-  
   esc_F.writeMicroseconds(valueF);
   esc_B.writeMicroseconds(valueB);
   esc_L.writeMicroseconds(valueL);
   esc_R.writeMicroseconds(valueR);
-
-//  if(Serial.available()) {
-//    value = Serial.parseInt();
-//    Serial.print(value);
-//    Serial.print("\n");
-//  }
 }
