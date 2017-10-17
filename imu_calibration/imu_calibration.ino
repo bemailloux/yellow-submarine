@@ -1,6 +1,8 @@
 #include "quaternionFilters.h"
 #include "MPU9250.h"
 #include <Servo.h>
+#include <Wire.h>
+#include <SPI.h>
 #include <PS2X_lib.h>
 
 #define AHRS true         // Set to false for basic data read
@@ -84,6 +86,8 @@ void setup()
   {
     ps2x.read_gamepad(false, false);
   }
+
+  Serial.print("Start pressed, reading gamepad\n");
 
   // Read the WHO_AM_I register, this is a good test of communication
   byte c = myIMU.readByte(MPU9250_ADDRESS, WHO_AM_I_MPU9250);
