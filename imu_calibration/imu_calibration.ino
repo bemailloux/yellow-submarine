@@ -82,10 +82,10 @@ void setup()
 
   Serial.print("PS2 Setup Complete\n");
 
-  while(!ps2x.Button(PSB_START))
-  {
-    ps2x.read_gamepad(false, false);
-  }
+//  while(!ps2x.Button(PSB_START))
+//  {
+//    ps2x.read_gamepad(false, false);
+//  }
 
   Serial.print("Start pressed, reading gamepad\n");
 
@@ -110,7 +110,7 @@ void setup()
 
     // Initialize device for active mode read of magnetometer
     myIMU.initAK8963(myIMU.factoryMagCalibration);
-    
+      
     // Get sensor resolutions, only need to do this once
     myIMU.getAres();
     myIMU.getGres();
