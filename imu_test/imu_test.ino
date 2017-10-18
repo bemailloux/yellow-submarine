@@ -77,7 +77,7 @@ void loop() {
 //  myIMU.delt_t = millis() - myIMU.count;
 
   // integrate angular velocity to get angular position (only yaw currently)
-//  double vel_diff = myIMU.gx - prev_gx;
+//  double vel_diff = myIMU.gx - prev_gx;z
   double pos_diff = ((long) myIMU.gz * 10) / 10000000.0 * (double) (current_time - prev_time);
 
   angle_pos = angle_pos + pos_diff;
