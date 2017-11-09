@@ -177,7 +177,11 @@ void autonomous() {
     valueF = MTR_OFF + 10*(pitch - pitch_ref);
     valueB = MTR_OFF + 10*(pitch - pitch_ref);
   }  
-
+  if (valueF < MAX_REV) valueF = MAX_REV;
+  if (valueB < MAX_REV) valueB = MAX_REV;
+  if (valueF > MAX_FWD) valueF = MAX_FWD;
+  if (valueF > MAX_FWD) valueF = MAX_FWD;
+      
   esc_F.writeMicroseconds(valueF);
   esc_B.writeMicroseconds(valueB);
   esc_L.writeMicroseconds(valueL);
