@@ -185,10 +185,10 @@ void autonomous_pitch() {
   if(myIMU.delt_t > 500)
   {
     // Borrow counter for printing pitch to print yaw too
-    Serial.print(yaw);
-    Serial.print(" ");
+    Serial.println(yaw);
+//    Serial.print(" ");
     //
-    Serial.println(pitch);
+//    Serial.println(pitch);
     myIMU.count = millis();
     myIMU.sumCount = 0;
     myIMU.sum = 0;
