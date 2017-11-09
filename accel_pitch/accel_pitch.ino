@@ -133,7 +133,8 @@ void autonomous() {
   {
     pitch_ref += 5;
   }
-  else if (ps2x.ButtonPressed(PSB_PAD_DOWN) && pitch_ref > -30) 
+  
+  if (ps2x.ButtonPressed(PSB_PAD_DOWN) && pitch_ref > -30) 
   {
     pitch_ref -= 5;
   }
@@ -181,7 +182,7 @@ void autonomous() {
   if (valueB < MAX_REV) valueB = MAX_REV;
   if (valueF > MAX_FWD) valueF = MAX_FWD;
   if (valueF > MAX_FWD) valueF = MAX_FWD;
-      
+
   esc_F.writeMicroseconds(valueF);
   esc_B.writeMicroseconds(valueB);
   esc_L.writeMicroseconds(valueL);
@@ -290,6 +291,7 @@ void loop()
   
   // TELEOPERATION MODE
   else {
+    pitch_ref = 0;
     digitalWrite(LED_RED, false);
     digitalWrite(LED_GREEN, true);
     teleoperation();
@@ -303,7 +305,13 @@ void loop()
     esc_L.writeMicroseconds(MTR_OFF);
     esc_R.writeMicroseconds(MTR_OFF);
 
-    abort();
+    digitalWrite(LED_RED, HIGH);
+    digitalWrite(LED_GREEN, HIGH);    
+    autonomous_mode = false;
+    while(!ps2x.Button(PSB_SQUARE)) {
+      ps2x.read_gamepad(false, false);  
+    }
+
   }
 
   // SWITCH MODES
