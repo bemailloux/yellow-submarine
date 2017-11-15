@@ -84,22 +84,22 @@ void motors(int thrust, int yaw, int collective, int pitch)
 
   // Down-facing Motors
   // Props are counter-rotating
-  valueB = map(thrust, -100, 100, MAX_REV, MAX_FWD);
-  valueF = map(thrust, -100, 100, MAX_FWD, MAX_REV);
+  valueB = map(collective, -100, 100, MAX_REV, MAX_FWD);
+  valueF = map(collective, -100, 100, MAX_FWD, MAX_REV);
 
   // Yaw will NOT use opposing thrust, we will just reduce power on the inside thruster. 
-  if(thrust != 0) {
-    if(pitch > 0) { // RIGHT
-      valueF = map(abs(pitch), 0, 100, valueF, MTR_OFF);
-    } else if (pitch < 0) { // LEFT
+  if(collective != 0) {
+    if(pitch > 0) { // UP
       valueB = map(abs(pitch), 0, 100, valueB, MTR_OFF);
+    } else if (pitch < 0) { // DOWN
+      valueF = map(abs(pitch), 0, 100, valueF, MTR_OFF);
     }
   } else {
     // If not moving forward, we will instead run the outside thruster. 
-    if(pitch > 0) { // RIGHT
-      valueB = map(abs(pitch), 0, 100, MTR_OFF, MAX_FWD);
-    } else if (pitch < 0) { // LEFT
-      valueF = map(abs(pitch), 0, 100, MTR_OFF, MAX_REV);
+    if(pitch > 0) { // UP
+      valueF = map(abs(pitch), 0, 100, MTR_OFF, MAX_FWD);
+    } else if (pitch < 0) { // DOWN
+      valueB = map(abs(pitch), 0, 100, MTR_OFF, MAX_REV);
     }
   }
 
@@ -107,6 +107,11 @@ void motors(int thrust, int yaw, int collective, int pitch)
   valueB = constrain(valueB, MAX_REV, MAX_FWD);
   valueL = constrain(valueL, MAX_REV, MAX_FWD);
   valueR = constrain(valueR, MAX_REV, MAX_FWD);
+
+  Serial.print(valueL); Serial.print(" ");
+  Serial.print(valueR); Serial.print(" ");
+  Serial.print(valueF); Serial.print(" ");
+  Serial.print(valueB); Serial.println("");
   
   esc_F.writeMicroseconds(valueF);
   esc_B.writeMicroseconds(valueB);
@@ -124,8 +129,17 @@ void teleoperate()
   int collective = 0;
   int pitch = 0;
 
-  if(ps2x.Button(PSB_L1)) { throttle = 100; } else if (ps2x.Button(PSB_L2)) { throttle = -100; }
-  if(ps2x.Button(PSB_R1)) { collective = 100; } else if (ps2x.Button(PSB_L2)) { collective = -100; }
+  if(ps2x.Button(PSB_L1)) { 
+    throttle = 100; 
+  } else if (ps2x.Button(PSB_L2)) { 
+    throttle = -100; 
+  }
+  
+  if(ps2x.Button(PSB_R1)) { 
+    collective = -100; 
+  } else if (ps2x.Button(PSB_R2)) { 
+    collective = 100; 
+  }
 
   yaw = map(ps2x.Analog(PSS_LX), ANALOG_MIN, ANALOG_MAX, -100, 100);
   pitch = map(ps2x.Analog(PSS_RY), ANALOG_MIN, ANALOG_MAX, -100, 100);
@@ -159,6 +173,10 @@ void setup() {
 ///////////////////////////////////////
 void loop() {
   ps2x.read_gamepad(false, false);
+
+  //Serial.print(ps2x.Analog(PSS_LX)); Serial.print(" ");
+  //Serial.print(ps2x.Analog(PSS_RY)); Serial.println(" ");
+  
   teleoperate();
   // KILL SWITCH
   if(ps2x.Button(PSB_CIRCLE))
