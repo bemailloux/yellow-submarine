@@ -238,13 +238,13 @@ void autopilot(int throttle = 0, int pitch_deg = 0, int heading = 180)
   // Pitch
   pitch_deg = constrain(pitch_deg, MIN_PITCH, MAX_PITCH);
   int pitch_error = myIMU.pitch - pitch_deg;
-  int pitch_control = map(error, MIN_PITCH, MAX_PITCH, 100, -100);
+  int pitch_control = map(pitch_error, MIN_PITCH, MAX_PITCH, 100, -100);
   pitch_control = constrain(pitch_control, -100, 100);
 
   // Yaw
   heading = constrain(heading, 0, 360);
   int heading_error = myIMU.yaw - heading;
-  int yaw_control = map(error, MIN_YAW, MAX_YAW, 100, -100);
+  int yaw_control = map(heading_error, MIN_YAW, MAX_YAW, 100, -100);
   yaw_control = constrain(yaw_control, -100, 100);
    
   motors(throttle, yaw_control, 0, pitch_control);
