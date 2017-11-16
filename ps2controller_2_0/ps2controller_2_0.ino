@@ -3,6 +3,9 @@
 #include <SPI.h>
 #include "PS2X_lib.h"
 
+#include <MPU9250.h>
+#include <quaternionFilters.h>
+
 // macros
 #define PS2_DAT 4 // data - brown (white)
 #define PS2_CMD 5 // command - orange
@@ -28,6 +31,47 @@ Servo esc_R;  // right
 
 PS2X ps2x;
 
+MPU9250 myIMU;
+
+void connect_imu()
+{
+  // Read the WHO_AM_I register, this is a good test of communication
+  byte c = myIMU.readByte(MPU9250_ADDRESS, WHO_AM_I_MPU9250);
+
+  if (c == 0x71) // WHO_AM_I should always be 0x71
+  {
+    // Start by performing self test and reporting values
+    myIMU.MPU9250SelfTest(myIMU.SelfTest);
+    
+    // Calibrate gyro and accelerometers, load biases in bias registers
+    myIMU.calibrateMPU9250(myIMU.gyroBias, myIMU.accelBias);
+
+    // Initialize device for active mode read of acclerometer, gyroscope, and
+    // temperature
+    myIMU.initMPU9250();
+
+    // Get sensor resolutions, only need to do this once
+    myIMU.getAres();
+    myIMU.getGres();
+    myIMU.getMres();
+
+    // The next call delays for 4 seconds, and then records about 15 seconds of
+    // data to calculate bias and scale.
+    Serial.println("Calibration Complete\n");
+
+  } // if (c == 0x71)
+  else
+  {
+    Serial.print("Could not connect to MPU9250: 0x");
+    Serial.println(c, HEX);
+
+    // Communication failed, stop here
+    Serial.println(F("Communication failed, abort!"));
+    Serial.flush();
+    abort();
+  }
+}
+
 void connect_ps2()
 {
   int error;
@@ -47,6 +91,63 @@ void connect_ps2()
     Serial.println("Controller refusing to enter Pressures mode, may not support it. ");
 
   Serial.print("PS2 Setup Complete\n");
+}
+
+void readIMU()
+{
+  if (myIMU.readByte(MPU9250_ADDRESS, INT_STATUS) & 0x01)
+  {
+    myIMU.readAccelData(myIMU.accelCount);  // Read the x/y/z adc values
+    myIMU.readGyroData(myIMU.gyroCount);
+    myIMU.readMagData(myIMU.magCount);
+    myIMU.getAres();
+    myIMU.ax = (float)myIMU.accelCount[0] * myIMU.aRes;
+    myIMU.ay = (float)myIMU.accelCount[1] * myIMU.aRes;
+    myIMU.az = (float)myIMU.accelCount[2] * myIMU.aRes;
+    myIMU.getGres();
+    myIMU.gx = (float)myIMU.gyroCount[0] * myIMU.gRes;
+    myIMU.gy = (float)myIMU.gyroCount[1] * myIMU.gRes;
+    myIMU.gz = (float)myIMU.gyroCount[2] * myIMU.gRes;
+    myIMU.getMres();
+    myIMU.mx = (float)myIMU.magCount[0] * myIMU.mRes;
+    myIMU.my = (float)myIMU.magCount[1] * myIMU.mRes;
+    myIMU.mz = (float)myIMU.magCount[2] * myIMU.mRes;
+    myIMU.updateTime();
+    MahonyQuaternionUpdate(myIMU.ax, myIMU.ay, myIMU.az, myIMU.gx * DEG_TO_RAD, myIMU.gy * DEG_TO_RAD, myIMU.gz * DEG_TO_RAD, myIMU.mx, myIMU.my, myIMU.mz, myIMU.deltat);
+    myIMU.yaw   = atan2(2.0f * (*(getQ()+1) * *(getQ()+2) + *getQ()
+                  * *(getQ()+3)), *getQ() * *getQ() + *(getQ()+1)
+                  * *(getQ()+1) - *(getQ()+2) * *(getQ()+2) - *(getQ()+3)
+                  * *(getQ()+3));
+    myIMU.pitch = -asin(2.0f * (*(getQ()+1) * *(getQ()+3) - *getQ()
+                  * *(getQ()+2)));
+    myIMU.roll  = atan2(2.0f * (*getQ() * *(getQ()+1) + *(getQ()+2)
+                  * *(getQ()+3)), *getQ() * *getQ() - *(getQ()+1)
+                  * *(getQ()+1) - *(getQ()+2) * *(getQ()+2) + *(getQ()+3)
+                  * *(getQ()+3));
+    myIMU.pitch *= RAD_TO_DEG;
+    myIMU.yaw   *= RAD_TO_DEG;
+    myIMU.roll  *= RAD_TO_DEG;
+    Serial.print(myIMU.pitch); Serial.print(" ");
+    Serial.print(myIMU.roll);  Serial.print(" ");
+    Serial.print(myIMU.yaw); Serial.println(" ");
+  } 
+}
+
+#define MAX_PITCH 20
+#define MIN_PITCH -20
+void autopilot(int throttle = 0, int pitch_deg = 0, int heading = 180)
+{
+  readIMU();
+  pitch_deg = constrain(pitch_deg, MIN_PITCH, MAX_PITCH);
+  int pitch = (int) (atan2(myIMU.ay, myIMU.az) * RAD_TO_DEG);
+  //Serial.print(pitch); Serial.print(" ");
+
+  int error = pitch - pitch_deg;
+  int pitch_control = map(error, MIN_PITCH, MAX_PITCH, 100, -100);
+  pitch_control = constrain(pitch_control, -100, 100);
+  //Serial.println(pitch_control);
+  int yaw_control = 0;
+  motors(throttle, yaw_control, 0, pitch_control);
 }
 
 // Centralized 'drive' funciton
@@ -108,10 +209,10 @@ void motors(int thrust, int yaw, int collective, int pitch)
   valueL = constrain(valueL, MAX_REV, MAX_FWD);
   valueR = constrain(valueR, MAX_REV, MAX_FWD);
 
-  Serial.print(valueL); Serial.print(" ");
-  Serial.print(valueR); Serial.print(" ");
-  Serial.print(valueF); Serial.print(" ");
-  Serial.print(valueB); Serial.println("");
+  //Serial.print(valueL); Serial.print(" ");
+  //Serial.print(valueR); Serial.print(" ");
+  //Serial.print(valueF); Serial.print(" ");
+  //Serial.print(valueB); Serial.println("");
   
   esc_F.writeMicroseconds(valueF);
   esc_B.writeMicroseconds(valueB);
@@ -147,6 +248,11 @@ void teleoperate()
   motors(throttle, yaw, collective, pitch);
 }
 
+void waitForStart()
+{
+  while(!ps2x.Button(PSB_START)) { ps2x.read_gamepad(false, false); };
+}
+
 ///////////////////////////////////////
 //////////////// SETUP ////////////////
 ///////////////////////////////////////
@@ -159,6 +265,8 @@ void setup() {
   esc_L.attach(ESC_PIN_L);
   esc_R.attach(ESC_PIN_R);
 
+  connect_imu();
+
   // LEDs
   pinMode(LED_RED, OUTPUT);
   pinMode(LED_GREEN, OUTPUT);
@@ -166,7 +274,16 @@ void setup() {
   motors(0, 0, 0, 0);
 
   connect_ps2();
+
+  // LEDs OFF to start
+  digitalWrite(LED_RED, 0);
+  digitalWrite(LED_GREEN, 0);
+
+  waitForStart();
+  digitalWrite(LED_GREEN, 1);
 }
+
+bool autonomous = false;
 
 ///////////////////////////////////////
 //////////////// LOOP /////////////////
@@ -174,10 +291,20 @@ void setup() {
 void loop() {
   ps2x.read_gamepad(false, false);
 
-  //Serial.print(ps2x.Analog(PSS_LX)); Serial.print(" ");
-  //Serial.print(ps2x.Analog(PSS_RY)); Serial.println(" ");
+  if(autonomous) {
+    digitalWrite(LED_RED, HIGH);
+    digitalWrite(LED_GREEN, LOW);
+    autopilot();
+  } else {
+    digitalWrite(LED_GREEN, HIGH);
+    digitalWrite(LED_RED, LOW);
+    teleoperate();
+  }
+
+  if(ps2x.ButtonPressed(PSB_TRIANGLE)) {
+    autonomous = !autonomous;
+  }
   
-  teleoperate();
   // KILL SWITCH
   if(ps2x.Button(PSB_CIRCLE))
   {
@@ -187,6 +314,7 @@ void loop() {
     while(!ps2x.Button(PSB_SQUARE)) {
       ps2x.read_gamepad(false, false);  
     }
+    autonomous = false;
+    digitalWrite(LED_RED, LOW);
   }
-
 }
