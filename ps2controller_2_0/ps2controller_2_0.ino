@@ -33,6 +33,10 @@ PS2X ps2x;
 
 MPU9250 myIMU;
 
+float zero_time;
+
+float YAW_DRIFT_COMPENSATION;
+
 void connect_imu()
 {
   // Read the WHO_AM_I register, this is a good test of communication
@@ -120,6 +124,8 @@ void initAHRS() {
   q1 = 0.0f;
   q2 = 0.0f;
   q3 = 0.0f;
+  // Make a note of the time at which the IMU was zeroed.
+  zero_time = millis() / 1000.0f;
 }
 
 float invSqrt(float x) {
@@ -133,7 +139,7 @@ float invSqrt(float x) {
   return y;
 }
 
-void updateAHRS() {
+void updateAHRS(float yaw_drift) {
   float recipNorm;
   float ax, ay, az;
   float gx, gy, gz;
@@ -204,6 +210,7 @@ void updateAHRS() {
   }
 
   // Integrate rate of change of quaternion to yield quaternion
+  
   q0 += qDot1 * myIMU.deltat;
   q1 += qDot2 * myIMU.deltat;
   q2 += qDot3 * myIMU.deltat;
@@ -217,13 +224,36 @@ void updateAHRS() {
   q3 *= recipNorm;
 
   // Store output values in IMU angle fields
-  myIMU.roll = atan2f(q0*q1 + q2*q3, 0.5f - q1*q1 - q2*q2) * RAD_TO_DEG;
-  myIMU.pitch = asinf(-2.0f * (q1*q3 - q0*q2)) * RAD_TO_DEG;
+  myIMU.pitch = atan2f(q0*q1 + q2*q3, 0.5f - q1*q1 - q2*q2) * RAD_TO_DEG;
+  // Using Gravity-based Pitch seems much more accurate than the quaternion math. 
+  //myIMU.pitch = (atan2(myIMU.ay, myIMU.az) * RAD_TO_DEG);
+  myIMU.roll = asinf(-2.0f * (q1*q3 - q0*q2)) * RAD_TO_DEG;
   myIMU.yaw = atan2f(q1*q2 + q0*q3, 0.5f - q2*q2 - q3*q3) * RAD_TO_DEG;
 
-  Serial.print(myIMU.roll); Serial.print(" ");
-  Serial.print(myIMU.pitch); Serial.print(" ");
-  Serial.print(myIMU.yaw); Serial.println("");
+  // WAG Yaw Drift Compensation
+  float time_since_zero = millis() / 1000.0f - zero_time;
+  myIMU.yaw += yaw_drift * time_since_zero;
+}
+  
+float measureYawDrift()
+{
+  initAHRS();
+  // Let the Quaternion Values Settle
+  do {
+    updateAHRS(0);
+  } while (abs(myIMU.roll) > 3 && abs(myIMU.pitch) > 3);
+  
+  float now = millis() / 1000.0f;
+  initAHRS();
+  float yaw = myIMU.yaw;
+  float calibration_seconds = 8.0f;
+  while ((millis() / 1000.0f) - now > calibration_seconds) {
+    updateAHRS(0);
+  }
+  float end_time = now + calibration_seconds;
+  
+  float yaw_drift = (yaw - myIMU.yaw) / (end_time - now);
+  return yaw_drift;
 }
 
 #define MAX_PITCH 20
@@ -231,19 +261,17 @@ void updateAHRS() {
 
 #define MAX_YAW 20
 #define MIN_YAW -20
-void autopilot(int throttle = 0, int pitch_deg = 0, int heading = 180)
+void autopilot(int throttle = 0, int pitch_deg = 0, int heading = 0)
 {
-  updateAHRS();
-
   // Pitch
   pitch_deg = constrain(pitch_deg, MIN_PITCH, MAX_PITCH);
   int pitch_error = myIMU.pitch - pitch_deg;
-  int pitch_control = map(pitch_error, MIN_PITCH, MAX_PITCH, 100, -100);
+  int pitch_control = map(pitch_error, MIN_PITCH, MAX_PITCH, -100, 100);
   pitch_control = constrain(pitch_control, -100, 100);
 
   // Yaw
-  heading = constrain(heading, 0, 360);
-  int heading_error = myIMU.yaw - heading;
+  heading = constrain(heading, -180, 180);
+  int heading_error = heading - myIMU.yaw;
   int yaw_control = map(heading_error, MIN_YAW, MAX_YAW, 100, -100);
   yaw_control = constrain(yaw_control, -100, 100);
    
@@ -350,7 +378,10 @@ void teleoperate()
 
 void waitForStart()
 {
-  while(!ps2x.Button(PSB_START)) { ps2x.read_gamepad(false, false); };
+  while(!ps2x.Button(PSB_START)) { 
+    ps2x.read_gamepad(false, false);
+    updateAHRS(0);
+  }
 }
 
 ///////////////////////////////////////
@@ -381,23 +412,38 @@ void setup() {
   digitalWrite(LED_RED, 0);
   digitalWrite(LED_GREEN, 0);
 
+  YAW_DRIFT_COMPENSATION = measureYawDrift();
+  digitalWrite(LED_RED, 1);
+
   waitForStart();
+  digitalWrite(LED_RED, 0);
   digitalWrite(LED_GREEN, 1);
+  initAHRS();
 }
 
 bool autonomous = false;
+bool autonomous_prev = false;
 
 ///////////////////////////////////////
 //////////////// LOOP /////////////////
 ///////////////////////////////////////
 void loop() {
   ps2x.read_gamepad(false, false);
+  updateAHRS(YAW_DRIFT_COMPENSATION);
+  Serial.print(myIMU.pitch); Serial.print(" ");
+  Serial.print(myIMU.roll); Serial.print(" ");
+  Serial.print(myIMU.yaw); Serial.println(" ");
 
   if(autonomous) {
+    if(autonomous_prev != autonomous) {
+      initAHRS();
+      autonomous_prev = autonomous;
+    }
     digitalWrite(LED_RED, HIGH);
     digitalWrite(LED_GREEN, LOW);
-    autopilot(100, 0, 180);
+    autopilot(0, 0, 0);
   } else {
+    autonomous_prev = autonomous;
     digitalWrite(LED_GREEN, HIGH);
     digitalWrite(LED_RED, LOW);
     teleoperate();
