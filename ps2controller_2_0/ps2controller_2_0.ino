@@ -45,11 +45,11 @@ void connect_pressure_sensor()
 {
   pressureSensor.reset();
   pressureSensor.begin();
-  pressure_atm = sensor.getRawPressure(ADC_4096);
+  pressure_atm = pressureSensor.getRawPressure(ADC_4096);
 }
 
 int get_depth() {
-  float pressure_abs = sensor.getRawPressure(ADC_4096);
+  float pressure_abs = pressureSensor.getRawPressure(ADC_4096);
   float depth = (pressure_abs - pressure_atm) / (995.944 * 9.81);
   return (int)(depth*100); // centimeters
 }
