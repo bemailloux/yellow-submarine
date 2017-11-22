@@ -239,20 +239,19 @@ float measureYawDrift()
 {
   initAHRS();
   // Let the Quaternion Values Settle
-  do {
-    updateAHRS(0);
-  } while (abs(myIMU.roll) > 3 && abs(myIMU.pitch) > 3);
+  //do {
+  //  updateAHRS(0);
+  //} while (abs(myIMU.roll) > 3 && abs(myIMU.pitch) > 3);
   
   float now = millis() / 1000.0f;
   initAHRS();
   float yaw = myIMU.yaw;
   float calibration_seconds = 8.0f;
-  while ((millis() / 1000.0f) - now > calibration_seconds) {
+  while (((millis() / 1000.0f) - now) < calibration_seconds) {
     updateAHRS(0);
   }
-  float end_time = now + calibration_seconds;
   
-  float yaw_drift = (yaw - myIMU.yaw) / (end_time - now);
+  float yaw_drift = (yaw - myIMU.yaw) / (calibration_seconds);
   return yaw_drift;
 }
 
@@ -266,13 +265,13 @@ void autopilot(int throttle = 0, int pitch_deg = 0, int heading = 0)
   // Pitch
   pitch_deg = constrain(pitch_deg, MIN_PITCH, MAX_PITCH);
   int pitch_error = myIMU.pitch - pitch_deg;
-  int pitch_control = map(pitch_error, MIN_PITCH, MAX_PITCH, -100, 100);
+  int pitch_control = map(pitch_error, MIN_PITCH, MAX_PITCH, 100, -100);
   pitch_control = constrain(pitch_control, -100, 100);
 
   // Yaw
   heading = constrain(heading, -180, 180);
-  int heading_error = heading - myIMU.yaw;
-  int yaw_control = map(heading_error, MIN_YAW, MAX_YAW, 100, -100);
+  int heading_error = myIMU.yaw - heading;
+  int yaw_control = map(heading_error, MIN_YAW, MAX_YAW, -100, 100);
   yaw_control = constrain(yaw_control, -100, 100);
    
   motors(throttle, yaw_control, 0, pitch_control);
