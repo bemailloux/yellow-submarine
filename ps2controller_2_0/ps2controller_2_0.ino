@@ -1,6 +1,7 @@
 #include <Servo.h>
 #include <Wire.h>
 #include <SPI.h>
+#include <SparkFun_MS5803_I2C.h>
 #include "PS2X_lib.h"
 
 #include <MPU9250.h>
@@ -32,10 +33,26 @@ Servo esc_R;  // right
 PS2X ps2x;
 
 MPU9250 myIMU;
+MS5803 pressureSensor(ADDRESS_HIGH);
+float base_altitude = 329.0; // Altitude of Waterloo Ontario [meters]
+float pressure_atm = 1.01325; // [Bar]
 
 float zero_time;
 
 float YAW_DRIFT_COMPENSATION;
+
+void connect_pressure_sensor()
+{
+  pressureSensor.reset();
+  pressureSensor.begin();
+  pressure_atm = sensor.getRawPressure(ADC_4096);
+}
+
+int get_depth() {
+  float pressure_abs = sensor.getRawPressure(ADC_4096);
+  float depth = (pressure_abs - pressure_atm) / (995.944 * 9.81);
+  return (int)(depth*100); // centimeters
+}
 
 void connect_imu()
 {
@@ -125,7 +142,7 @@ void initAHRS() {
   q2 = 0.0f;
   q3 = 0.0f;
   // Make a note of the time at which the IMU was zeroed.
-  zero_time = millis() / 1000.0f;
+  zero_time = seconds();
 }
 
 float invSqrt(float x) {
@@ -231,7 +248,7 @@ void updateAHRS(float yaw_drift) {
   myIMU.yaw = atan2f(q1*q2 + q0*q3, 0.5f - q2*q2 - q3*q3) * RAD_TO_DEG;
 
   // WAG Yaw Drift Compensation
-  float time_since_zero = millis() / 1000.0f - zero_time;
+  float time_since_zero = seconds() - zero_time;
   myIMU.yaw += yaw_drift * time_since_zero;
 }
   
@@ -243,11 +260,11 @@ float measureYawDrift()
   //  updateAHRS(0);
   //} while (abs(myIMU.roll) > 3 && abs(myIMU.pitch) > 3);
   
-  float now = millis() / 1000.0f;
+  float now = seconds();
   initAHRS();
   float yaw = myIMU.yaw;
   float calibration_seconds = 8.0f;
-  while (((millis() / 1000.0f) - now) < calibration_seconds) {
+  while ((seconds() - now) < calibration_seconds) {
     updateAHRS(0);
   }
   
@@ -260,7 +277,11 @@ float measureYawDrift()
 
 #define MAX_YAW 20
 #define MIN_YAW -20
-void autopilot(int throttle = 0, int pitch_deg = 0, int heading = 0)
+
+#define MAX_DEPTH 20
+#define MIN_DEPTH -20
+
+void autopilot(int throttle = 0, int pitch_deg = 0, int heading = 0, int depth = 0)
 {
   // Pitch
   pitch_deg = constrain(pitch_deg, MIN_PITCH, MAX_PITCH);
@@ -273,8 +294,14 @@ void autopilot(int throttle = 0, int pitch_deg = 0, int heading = 0)
   int heading_error = myIMU.yaw - heading;
   int yaw_control = map(heading_error, MIN_YAW, MAX_YAW, -100, 100);
   yaw_control = constrain(yaw_control, -100, 100);
-   
-  motors(throttle, yaw_control, 0, pitch_control);
+
+  // Depth
+  depth = constrain(depth, 0, 122);
+  int depth_error = get_depth() - depth;
+  int depth_control = map(depth_error, MIN_DEPTH, MAX_DEPTH, 100, -100);
+  depth_control = constrain(depth_control, -100, 100);
+  
+  motors(throttle, yaw_control, depth_control, pitch_control);
 }
 
 // Centralized 'drive' funciton
@@ -396,6 +423,7 @@ void setup() {
   esc_R.attach(ESC_PIN_R);
 
   connect_imu();
+  connect_pressure_sensor();
 
   initAHRS();
 
@@ -423,24 +451,64 @@ void setup() {
 bool autonomous = false;
 bool autonomous_prev = false;
 
+float seconds() { return millis() / 1000.0f; }
+
+int obstacleCourseStage = 0;
+float obstacleCourseStart = 0;
+float stageStart = 0;
+#define FIRST_OBSTACLE_DEPTH 100
+#define TABLE_DEPTH 40
+
+// void autopilot(int throttle = 0, int pitch_deg = 0, int heading = 0, int depth = 0)
+
 ///////////////////////////////////////
 //////////////// LOOP /////////////////
 ///////////////////////////////////////
 void loop() {
   ps2x.read_gamepad(false, false);
   updateAHRS(YAW_DRIFT_COMPENSATION);
-  Serial.print(myIMU.pitch); Serial.print(" ");
-  Serial.print(myIMU.roll); Serial.print(" ");
-  Serial.print(myIMU.yaw); Serial.println(" ");
+  //Serial.print(myIMU.pitch); Serial.print(" ");
+  //Serial.print(myIMU.roll); Serial.print(" ");
+  //Serial.print(myIMU.yaw); Serial.println(" ");
 
   if(autonomous) {
+    // Some initialization stuff when we switch from tele-op to autonomous.
     if(autonomous_prev != autonomous) {
       initAHRS();
       autonomous_prev = autonomous;
+      obstacleCourseStage = 0;
+      obstacleCourseStart = seconds();
+      stageStart = seconds(); 
     }
     digitalWrite(LED_RED, HIGH);
     digitalWrite(LED_GREEN, LOW);
-    autopilot(0, 0, 0);
+
+    // Obstacle Course Programming
+    switch(obstacleCourseStage){
+      case 0:
+        // Make a diving right hand turn to clear the first obstacle
+        if(get_depth() < FIRST_OBSTACLE_DEPTH) {
+          autopilot(50, -10, -23, FIRST_OBSTACLE_DEPTH);
+        } else {
+          obstacleCourseStage = 1;
+          stageStart = seconds();
+        }
+      case 1:
+        // Continue at first-obstacle depth on a heading of 023 to move under the obstacle
+        if((seconds() - stageStart) < 4) {
+          autopilot(100, 0, -23, FIRST_OBSTACLE_DEPTH); 
+        } else {
+          obstacleCourseStage = 2;
+          stageStart = seconds();
+        }
+      case 2:
+        // Come left, back to a heading of 000 and ascend to clear the table.
+        // Consider adding pitch to climb if the rate isn't adaquate here. 
+        autopilot(100, 0, 0, TABLE_DEPTH);
+      default:
+        autopilot(0, 0, 0, 0);
+    }
+    
   } else {
     autonomous_prev = autonomous;
     digitalWrite(LED_GREEN, HIGH);
