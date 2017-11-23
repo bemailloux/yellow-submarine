@@ -35,7 +35,8 @@ PS2X ps2x;
 MPU9250 myIMU;
 MS5803 pressureSensor(ADDRESS_HIGH);
 float base_altitude = 329.0; // Altitude of Waterloo Ontario [meters]
-float pressure_atm = 1.01325; // [Bar]
+float pressure_atm = 101325; // Pa
+float pressure_max = 113050; // Pa (WAG at pressure on the bottom)
 
 float zero_time;
 
@@ -48,10 +49,17 @@ void connect_pressure_sensor()
   pressure_atm = pressureSensor.getRawPressure(ADC_4096);
 }
 
+// This represents the pressure at the bottom of the pool
+void get_pressure_datum()
+{ 
+  pressure_max = pressureSensor.getRawPressure(ADC_4096);
+}
+
+#define COURSE_MAX_DEPTH 120
+
 int get_depth() {
   float pressure_abs = pressureSensor.getRawPressure(ADC_4096);
-  float depth = (pressure_abs - pressure_atm) / (995.944 * 9.81);
-  return (int)(depth*100); // centimeters
+  return map(pressure_abs, pressure_atm, pressure_max, 0, COURSE_MAX_DEPTH);
 }
 
 void connect_imu()
@@ -297,8 +305,10 @@ void autopilot(int throttle = 0, int pitch_deg = 0, int heading = 0, int depth =
 
   // Depth
   depth = constrain(depth, 0, 122);
-  int depth_error = get_depth() - depth;
-  int depth_control = map(depth_error, MIN_DEPTH, MAX_DEPTH, 100, -100);
+  int depth_error = get_depth() - depth; // If depth_error is +ve then we are BELOW the target depth and we need to ASCEND
+  // Maximum Depth is 20 cm BELOW the target, corresponding to a command to ascend
+  // Minimum Depth is 20 cm ABOVE the target, corresponding to a command to descend
+  int depth_control = map(depth_error, MIN_DEPTH, MAX_DEPTH, -100, 100);
   depth_control = constrain(depth_control, -100, 100);
   
   motors(throttle, yaw_control, depth_control, pitch_control);
@@ -414,18 +424,32 @@ void waitForStart()
 //////////////// SETUP ////////////////
 ///////////////////////////////////////
 void setup() {
+
+  connect_ps2();
+  
   Wire.begin();
   Serial.begin(115200);
+
+  Serial.println("Setup Begins");
 
   esc_F.attach(ESC_PIN_F);
   esc_B.attach(ESC_PIN_B);
   esc_L.attach(ESC_PIN_L);
   esc_R.attach(ESC_PIN_R);
 
+  Serial.println("ESCs Connected");
+
   connect_imu();
+
+  Serial.println("IMU Connected");
+  
   connect_pressure_sensor();
 
+  Serial.println("Pressure Sensor Connected");
+
   initAHRS();
+
+  Serial.println("AHRS Initiated");
 
   // LEDs
   pinMode(LED_RED, OUTPUT);
@@ -433,7 +457,7 @@ void setup() {
 
   motors(0, 0, 0, 0);
 
-  connect_ps2();
+  Serial.println("Motors All-Stop");
 
   // LEDs OFF to start
   digitalWrite(LED_RED, 0);
@@ -441,6 +465,8 @@ void setup() {
 
   YAW_DRIFT_COMPENSATION = measureYawDrift();
   digitalWrite(LED_RED, 1);
+
+  Serial.println("Setup Complete, Waiting for Start");
 
   waitForStart();
   digitalWrite(LED_RED, 0);
@@ -456,8 +482,8 @@ float seconds() { return millis() / 1000.0f; }
 int obstacleCourseStage = 0;
 float obstacleCourseStart = 0;
 float stageStart = 0;
-#define FIRST_OBSTACLE_DEPTH 100
-#define TABLE_DEPTH 40
+#define FIRST_OBSTACLE_DEPTH 90
+#define TABLE_DEPTH 30
 
 // void autopilot(int throttle = 0, int pitch_deg = 0, int heading = 0, int depth = 0)
 
@@ -467,9 +493,6 @@ float stageStart = 0;
 void loop() {
   ps2x.read_gamepad(false, false);
   updateAHRS(YAW_DRIFT_COMPENSATION);
-  //Serial.print(myIMU.pitch); Serial.print(" ");
-  //Serial.print(myIMU.roll); Serial.print(" ");
-  //Serial.print(myIMU.yaw); Serial.println(" ");
 
   if(autonomous) {
     // Some initialization stuff when we switch from tele-op to autonomous.
@@ -488,27 +511,30 @@ void loop() {
       case 0:
         // Make a diving right hand turn to clear the first obstacle
         if(get_depth() < FIRST_OBSTACLE_DEPTH) {
-          autopilot(50, -10, -23, FIRST_OBSTACLE_DEPTH);
+          autopilot(50, 0, -21, FIRST_OBSTACLE_DEPTH);
         } else {
           obstacleCourseStage = 1;
           stageStart = seconds();
         }
+      break;
       case 1:
         // Continue at first-obstacle depth on a heading of 023 to move under the obstacle
         if((seconds() - stageStart) < 4) {
-          autopilot(100, 0, -23, FIRST_OBSTACLE_DEPTH); 
+          autopilot(100, 0, -21, FIRST_OBSTACLE_DEPTH); 
         } else {
           obstacleCourseStage = 2;
           stageStart = seconds();
         }
+      break;
       case 2:
         // Come left, back to a heading of 000 and ascend to clear the table.
         // Consider adding pitch to climb if the rate isn't adaquate here. 
         autopilot(100, 0, 0, TABLE_DEPTH);
+      break;
       default:
-        autopilot(0, 0, 0, 0);
+        autopilot(0, 0, 0, 70);
+      break;
     }
-    
   } else {
     autonomous_prev = autonomous;
     digitalWrite(LED_GREEN, HIGH);
@@ -518,6 +544,10 @@ void loop() {
 
   if(ps2x.ButtonPressed(PSB_TRIANGLE)) {
     autonomous = !autonomous;
+  }
+
+  if(ps2x.ButtonPressed(PSB_SELECT)) {
+    get_pressure_datum();   
   }
   
   // KILL SWITCH
